@@ -1,5 +1,6 @@
 #include <iostream>
 #include <cmath>
+#include <vector>
 #include <random>
 #include <sstream>
 #include <fstream>
@@ -8,8 +9,7 @@
 #include <time.h>
 #include <omp.h>
 #include <sys/time.h>
-#include <fenv.h>
-int x = feenableexcept(FE_INVALID | FE_OVERFLOW);
+#include <limits>
 
 double get_wall_time(){
     struct timeval time;
@@ -22,7 +22,8 @@ std::random_device rd;
 std::mt19937 mt(rd());
 std::uniform_real_distribution<float> dist(0.0, 1.0);
 
-float ds = 1e-3; 
+const float eps = std::numeric_limits<float>::epsilon();
+const float ds = 1e-3; 
 const int ZC = 666;
 const int SC = 667;
 const int AB = 668;
@@ -52,8 +53,6 @@ float sample_tau()
 void move_photon(const float* tau, const float* ssa, const float k_null, const int* size,
                 float* position, float* direction, int& event)
 {
-    if (size[0] != 47 || size[1] != 82)
-        printf("%i - %i",size[0],size[1]);
     const float s = sample_tau() / k_null;
     const float s_max = std::min((float(size[0])*(direction[0]>0)-position[0])/direction[0],
                                  (float(size[1])*(direction[1]>0)-position[1])/direction[1]);
@@ -61,16 +60,14 @@ void move_photon(const float* tau, const float* ssa, const float k_null, const i
     {
         position[0] += direction[0]*(s_max+ds);
         position[1] += direction[1]*(s_max+ds);
-        if (isnan(position[0]))
-            printf("Shouldn't happen at all -.- : %.2f %.2f %.5f %.5f \n", position[0], position[1], direction[0], direction[1]);
-
-        if (position[1] > size[1])
+        
+        if (position[1] >= size[1])
         {
-            position[1] -= size[1];
+            position[1] = ds;
         }
-        else if (position[1] < 0)
+        else if (position[1] <= 0)
         {
-            position[1] += size[1];
+            position[1] = size[1] - ds;
         }   
         event = BD;
 
@@ -81,10 +78,6 @@ void move_photon(const float* tau, const float* ssa, const float k_null, const i
         position[1] += direction[1]*s;
         const float r = dist(mt);
         const int idx = int(position[1]) + int(position[0]) * size[1];
-        if (position[0]<=0 || position[0]>=47 || position[1]<=0 || position[1]>=82)
-                printf("this is not supposed to happen %.5f %.5f %.5f %.5f %f %f %i \n", position[0], position[1], direction[0], direction[1], s, s_max, idx);
-        if (isnan(position[0]))
-            printf("Shouldn't happen at all: %.2f %.2f %.5f %.5f %i \n", position[0], position[1], direction[0], direction[1], idx);
         if (r*k_null >= tau[idx])
             event = ZC;
         else if (r*k_null <= tau[idx]*ssa[idx])
@@ -105,10 +98,9 @@ void hit_event(const int event, const float* ssa, const int* cld_mask, const flo
         const int idx = int(position[1]) + int(position[0]) * size[1];
         if (cld_mask[idx]==1 && dist(mt) < cloud_clear_frac) // cloud scattering
         {
-            const float mu_scat  = henyey(g); 
-            const float angle= acos(mu_scat) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
-            if (isnan(direction[0]) || isnan(direction[1]) || isnan(angle))
-                printf("henyey %f   %f   %f",angle, direction[0], direction[1]);
+            const float mu_scat  = henyey(g);
+            const float angle= acos(std::min(std::max(-1.f+eps,mu_scat),1.f-eps)) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
+
             direction[0] = sin(angle);
             direction[1] = cos(angle);
         }
@@ -116,8 +108,6 @@ void hit_event(const int event, const float* ssa, const int* cld_mask, const flo
         {
             const float mu_scat = rayleigh();   
             const float angle= acos(mu_scat) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
-            if (isnan(direction[0]) || isnan(direction[1]))
-                printf("rayleigh %f   %f   %f",angle, direction[0], direction[1]);
             direction[0] = sin(angle);
             direction[1] = cos(angle);
         }
@@ -171,11 +161,9 @@ void trace_ray(const float* tau, const float* ssa, const float g, const int* cld
                const float cloud_clear_frac, const float k_null,
                const int n_photon, int* sfc_dir, int* sfc_dif)
 {
-
-//    #pragma omp parallel for
+    //#pragma omp parallel for
     for (int iphoton = 0; iphoton < n_photon; ++iphoton)
     {
-        //std::cout<<"thread  "<<omp_get_thread_num()<<std::endl;
         float direction[2] = {-float(cos(sza_rad)), float(sin(sza_rad))};       
         float position[2]  = {size[0]-ds, dist(mt)*size[1]};       
         bool f_alive  = true;
@@ -184,10 +172,7 @@ void trace_ray(const float* tau, const float* ssa, const float g, const int* cld
         while (f_alive)
         {
             move_photon(tau, ssa, k_null, size, position, direction, event);
-            if (isnan(position[0]) || isnan(position[1]))
-                break;
             hit_event(event, ssa, cld_mask, cloud_clear_frac, size, albedo, g, position, direction, f_direct, f_alive);
-
         }
         if (position[0] <= 0)
         {
@@ -197,7 +182,7 @@ void trace_ray(const float* tau, const float* ssa, const float g, const int* cld
                 sfc_dif[int(position[1])] += 1;
         }
     }
-
+       
 }
 
 int main()

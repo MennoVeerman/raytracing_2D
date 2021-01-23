@@ -15,10 +15,13 @@ k_null = 0.8 + 3e-4
 n_photon = 10000000
 sfc_dir = np.zeros(82, dtype=np.int32)
 sfc_dif = np.zeros(82, dtype=np.int32)
+start = dt.datetime.now()
 ray_tracer_cpp.trace_rays_interface(tau, ssa, np.float32(g), cld_mask, size,
                                     np.float32(albedo), np.float32(sza_rad),
                                     np.float32(cloud_clear_frac), np.float32(k_null),
                                     np.int32(n_photon), sfc_dir, sfc_dif)
+end = dt.datetime.now()
+print(n_photon, end-start)
 
 #print("-------------------")
 #means = []
