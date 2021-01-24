@@ -1,0 +1,11 @@
+#!/bin/bash
+CYTHON_EXEC=cython
+CXX=g++
+PYTHON_INCDIR=$(python3-config --includes)
+PYTHON_LDFLAGS=$(python3-config --ldflags)
+NUMPY_INCDIR=$(python3 -c "import numpy; print(numpy.get_include());")
+CCFLAGS=" -std=c++14 -shared -fPIC -O3 -march=native"
+${CYTHON_EXEC} -3 --cplus ray_tracer_cpp.pyx
+${CXX} ${CCFLAGS} -I${PYTHON_INCDIR} -I${NUMPY_INCDIR} ${PYTHON_LDFLAGS} -o ray_tracer_cpp.so ray_tracer_cpp.cpp
+
+
