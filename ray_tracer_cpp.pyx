@@ -11,9 +11,9 @@ cdef extern from "main.cpp":
         const float* tau, const float* ssa, const float g,
         const int* cld_mask, const int* size, const float albedo,
         const float sza_rad, const float cloud_clear_frac, const float k_null,
-        const int n_photon, int* sfc_dir, int* sfc_dif)
+        const int n_photon, int* sfc_dir, int* sfc_dif, int nseed)
 
-@cython.boundscheck(True)
+@cython.boundscheck(False)
 @cython.wraparound(False)
 def trace_rays_interface(
         np.ndarray[float, ndim = 2, mode = "c"] tau not None,
@@ -27,11 +27,12 @@ def trace_rays_interface(
         float k_null,
         int n_photon,
         np.ndarray[int, ndim = 1, mode = "c"] sfc_dir not None,
-        np.ndarray[int, ndim = 1, mode = "c"] sfc_dif not None):
+        np.ndarray[int, ndim = 1, mode = "c"] sfc_dif not None,
+        int nseed):
     trace_ray(
             &tau[0,0], &ssa[0,0], g, &cld_mask[0,0], &size[0],
             albedo, sza_rad, cloud_clear_frac, k_null, n_photon,
-            &sfc_dir[0], &sfc_dif[0])
+            &sfc_dir[0], &sfc_dif[0], nseed)
     return None
 
 

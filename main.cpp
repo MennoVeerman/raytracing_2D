@@ -159,8 +159,9 @@ void hit_event(const int event, const float* ssa, const int* cld_mask, const flo
 void trace_ray(const float* tau, const float* ssa, const float g, const int* cld_mask, 
                const int* size, const float albedo, const float sza_rad,
                const float cloud_clear_frac, const float k_null,
-               const int n_photon, int* sfc_dir, int* sfc_dif)
+               const int n_photon, int* sfc_dir, int* sfc_dif, int nseed)
 {
+    mt.seed(nseed);    
     //#pragma omp parallel for
     for (int iphoton = 0; iphoton < n_photon; ++iphoton)
     {
@@ -199,7 +200,6 @@ int main()
     float ssa[47*82];
     int  cld_mask[47*82];
     int n_photon = int(10000000);
-    
     // read tau
     std::ifstream tau_in;
     tau_in.open("tau.txt");
@@ -233,7 +233,7 @@ int main()
     std::cout<<"starting tracing rays"<<std::endl;
     
     double starttime = get_wall_time();
-    trace_ray(tau, ssa, g, cld_mask, size, albedo, sza, cld_clr_f, k_null, n_photon, sfc_dir, sfc_dif);
+    trace_ray(tau, ssa, g, cld_mask, size, albedo, sza, cld_clr_f, k_null, n_photon, sfc_dir, sfc_dif, 1);
     double endtime = get_wall_time();
     
     std::cout<<n_photon<<" photons, runtime: "<<endtime-starttime<<" s"<<std::endl;
