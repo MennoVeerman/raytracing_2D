@@ -10,6 +10,7 @@
 #include <omp.h>
 #include <sys/time.h>
 #include <limits>
+#include <omp.h>
 
 double get_wall_time(){
     struct timeval time;
@@ -19,7 +20,7 @@ double get_wall_time(){
     return (double)time.tv_sec + (double)time.tv_usec * .000001;
 }
 std::random_device rd;
-std::mt19937 mt(rd());
+//std::mt19937 mt(rd());
 std::uniform_real_distribution<float> dist(0.0, 1.0);
 
 const float eps = std::numeric_limits<float>::epsilon();
@@ -29,7 +30,7 @@ const int SC = 667;
 const int AB = 668;
 const int BD = 669;
 
-float rayleigh()
+float rayleigh(std::mt19937& mt)
 {
     const float q = 4.f*dist(mt)-2.f;
     const float d = 1.f+q*q;
@@ -37,7 +38,7 @@ float rayleigh()
     return u-1.f/u;
 }
 
-float henyey(float g)
+float henyey(float g, std::mt19937& mt)
 {
     const float a = pow(1.f-pow(g,2.f), 2.f);
     const float b = 2.f*g*pow(2*dist(mt)*g+1.f-g, 2.f);
@@ -45,15 +46,15 @@ float henyey(float g)
     return -1.f*(a/b)-c;
 }
 
-float sample_tau()
+float sample_tau(std::mt19937& mt)
 {
     return -1.f*log(-dist(mt)+1.f);
 }
 
 void move_photon(const float* tau, const float* ssa, const float k_null, const int* size,
-                float* position, float* direction, int& event)
+                float* position, float* direction, int& event, std::mt19937& mt)
 {
-    const float s = sample_tau() / k_null;
+    const float s = sample_tau(mt) / k_null;
     const float s_max = std::min((float(size[0])*(direction[0]>0)-position[0])/direction[0],
                                  (float(size[1])*(direction[1]>0)-position[1])/direction[1]);
     if (s+ds >= s_max)
@@ -89,7 +90,7 @@ void move_photon(const float* tau, const float* ssa, const float k_null, const i
 
 void hit_event(const int event, const float* ssa, const int* cld_mask, const float cloud_clear_frac, 
                const int* size, const float albedo, const float g,
-               float* position, float* direction, bool& f_direct, bool& f_alive)
+               float* position, float* direction, bool& f_direct, bool& f_alive, std::mt19937& mt)
 {
     if (event == SC)
     {
@@ -98,15 +99,15 @@ void hit_event(const int event, const float* ssa, const int* cld_mask, const flo
         const int idx = int(position[1]) + int(position[0]) * size[1];
         if (cld_mask[idx]==1 && dist(mt) < cloud_clear_frac) // cloud scattering
         {
-            const float mu_scat  = henyey(g);
-            const float angle= acos(std::min(std::max(-1.f+eps,mu_scat),1.f-eps)) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
+            const float mu_scat  = henyey(g, mt);
+            const float angle = acos(std::min(std::max(-1.f+eps,mu_scat),1.f-eps)) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
 
             direction[0] = sin(angle);
             direction[1] = cos(angle);
         }
         else // gas scattering
         {
-            const float mu_scat = rayleigh();   
+            const float mu_scat = rayleigh(mt);   
             const float angle= acos(mu_scat) + atan2(direction[0], direction[1]) * int(-1+2*(dist(mt) > .5f)); 
             direction[0] = sin(angle);
             direction[1] = cos(angle);
@@ -161,29 +162,45 @@ void trace_ray(const float* tau, const float* ssa, const float g, const int* cld
                const float cloud_clear_frac, const float k_null,
                const int n_photon, int* sfc_dir, int* sfc_dif, int nseed)
 {
-    mt.seed(nseed);    
-    //#pragma omp parallel for
-    for (int iphoton = 0; iphoton < n_photon; ++iphoton)
+    int n_threads = omp_get_max_threads();
+    int photons_per_block = int(n_photon/n_threads);
+    
+    #pragma omp parallel for
+    for (int ithread = 0; ithread < n_threads; ++ithread)
     {
-        float direction[2] = {-float(cos(sza_rad)), float(sin(sza_rad))};       
-        float position[2]  = {size[0]-ds, dist(mt)*size[1]};       
-        bool f_alive  = true;
-        bool f_direct = true;
-        int event     = 0;
-        while (f_alive)
+        std::mt19937 mt(ithread+100*nseed);
+        #pragma omp critical
+        std::cout<<"#thread "<<ithread<<std::endl;
+        std::vector<int> sfc_dir_tmp(size[1], 0);      
+        std::vector<int> sfc_dif_tmp(size[1], 0);      
+        for (int iphoton = 0; iphoton < photons_per_block; ++iphoton)
         {
-            move_photon(tau, ssa, k_null, size, position, direction, event);
-            hit_event(event, ssa, cld_mask, cloud_clear_frac, size, albedo, g, position, direction, f_direct, f_alive);
+            int nhreads = omp_get_num_threads();
+            float direction[2] = {-float(cos(sza_rad)), float(sin(sza_rad))};       
+            float position[2]  = {size[0]-ds, dist(mt)*size[1]};       
+            bool f_alive  = true;
+            bool f_direct = true;
+            int event     = 0;
+            while (f_alive)
+            {
+                move_photon(tau, ssa, k_null, size, position, direction, event, mt);
+                hit_event(event, ssa, cld_mask, cloud_clear_frac, size, albedo, g, position, direction, f_direct, f_alive, mt);
+            }
+            if (position[0] <= 0)
+            {
+                if (f_direct)
+                    sfc_dir_tmp[int(position[1])] += 1;
+                else
+                    sfc_dif_tmp[int(position[1])] += 1;
+            }
         }
-        if (position[0] <= 0)
+        #pragma omp critical
+        for (int ix = 0; ix < size[1]; ++ix)
         {
-            if (f_direct)
-                sfc_dir[int(position[1])] += 1;
-            else
-                sfc_dif[int(position[1])] += 1;
+            sfc_dir[ix] += sfc_dir_tmp[ix];
+            sfc_dif[ix] += sfc_dif_tmp[ix];
         }
-    }
-       
+    }      
 }
 
 int main()
@@ -198,6 +215,7 @@ int main()
     int sfc_dif[82] = {};
     float tau[47*82];
     float ssa[47*82];
+
     int  cld_mask[47*82];
     int n_photon = int(10000000);
     // read tau
